@@ -3,13 +3,10 @@ const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Serveur en cours sur http://localhost:${PORT}`);
-
 
 // 🔹 Liens iCal publics
 const LIVA_ICAL = 'https://calendar.google.com/calendar/ical/25b3ab9fef930d1760a10e762624b8f604389bdbf69d0ad23c98759fee1b1c89%40group.calendar.google.com/public/basic.ics';
-const BLOM_ICAL = 'https://calendar.google.com/calendar/ical/c686866e780e72a89dd094dedc492475386f2e6ee8e22b5a63efe7669d52621b%40group.calendar.google.com/public/basic.ics'; // Remplace TON_CALENDAR_BLOM_PUBLIC par ton vrai lien public
+const BLOM_ICAL = 'https://calendar.google.com/calendar/ical/c686866e780e72a89dd094dedc492475386f2e6ee8e22b5a63efe7669d52621b%40group.calendar.google.com/public/basic.ics';
 
 // Route LIVA
 app.get('/calendar/liva', async (req, res) => {
@@ -50,7 +47,7 @@ app.get('/', (req, res) => {
     `);
 });
 
-// Démarrage du serveur
+// Démarrage du serveur (seul app.listen)
 app.listen(PORT, () => {
     console.log(`✅ Serveur iCal en cours sur http://localhost:${PORT}`);
 });
