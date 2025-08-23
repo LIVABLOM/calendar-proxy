@@ -3,6 +3,8 @@ const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Serveur en cours sur http://localhost:${PORT}`);
 
 
 // 🔹 Liens iCal publics
