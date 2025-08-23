@@ -1,24 +1,25 @@
-// server.js
 import express from 'express';
 import ical from 'ical-generator';
 import fetch from 'node-fetch';
 import icalParser from 'node-ical';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 5000;
 
-// Liens ICS pour LIVA
+// Liens ICS depuis .env
 const LIVA_ICAL_LINKS = [
-  'https://calendar.google.com/calendar/ical/25b3ab9fef930d1760a10e762624b8f604389bdbf69d0ad23c98759fee1b1c89%40group.calendar.google.com/private-13c805a19f362002359c4036bf5234d6/basic.ics',
-  'https://www.airbnb.fr/calendar/ical/41095534.ics?s=723d983690200ff422703dc7306303de',
-  'https://ical.booking.com/v1/export?t=30a4b8a1-39a3-4dae-9021-0115bdd5e49d'
+  process.env.LIVA_GOOGLE_ICS,
+  process.env.LIVA_AIRBNB_ICS,
+  process.env.LIVA_BOOKING_ICS
 ];
 
-// Liens ICS pour BLŌM
 const BLOM_ICAL_LINKS = [
-  'https://calendar.google.com/calendar/ical/c686866e780e72a89dd094dedc492475386f2e6ee8e22b5a63efe7669d52621b%40group.calendar.google.com/private-a78ad751bafd3b6f19cf5874453e6640/basic.ics',
-  'https://www.airbnb.fr/calendar/ical/985569147645507170.ics?s=b9199a1a132a6156fcce597fe4786c1e',
-  'https://ical.booking.com/v1/export?t=8b652fed-8787-4a0c-974c-eb139f83b20f'
+  process.env.BLOM_GOOGLE_ICS,
+  process.env.BLOM_AIRBNB_ICS,
+  process.env.BLOM_BOOKING_ICS
 ];
 
 // Fonction pour récupérer et parser un lien ICS
@@ -58,7 +59,6 @@ async function generateCombinedICS(res, name, links) {
 app.get('/calendar/liva', (req, res) => generateCombinedICS(res, 'LIVA Calendar', LIVA_ICAL_LINKS));
 app.get('/calendar/blom', (req, res) => generateCombinedICS(res, 'BLŌM Calendar', BLOM_ICAL_LINKS));
 
-// Page d’accueil
 app.get('/', (req, res) => {
   res.send(`
     <h2>Serveur iCal en cours</h2>
@@ -69,5 +69,4 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Démarrage du serveur
 app.listen(PORT, () => console.log(`✅ Serveur iCal en cours sur le port ${PORT}`));
