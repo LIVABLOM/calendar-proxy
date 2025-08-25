@@ -1,35 +1,38 @@
-import dotenv from 'dotenv';
-dotenv.config();
+// server.js - Version CommonJS (compatible Railway)
 
-import express from 'express';
-import ical from 'ical-generator';
-import fetch from 'node-fetch';
-import icalParser from 'node-ical';
+const express = require('express');
+const ical = require('ical-generator');
+const fetch = require('node-fetch');
+const icalParser = require('node-ical');
+require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Liens ICS depuis .env
 const LIVA_ICAL_LINKS = [
   process.env.LIVA_GOOGLE_ICS,
   process.env.LIVA_AIRBNB_ICS,
   process.env.LIVA_BOOKING_ICS
-];
+].filter(Boolean);
 
 const BLOM_ICAL_LINKS = [
   process.env.BLOM_GOOGLE_ICS,
   process.env.BLOM_AIRBNB_ICS,
   process.env.BLOM_BOOKING_ICS
-];
+].filter(Boolean);
 
 // Fonction pour récupérer et parser un lien ICS
 async function fetchICalEvents(url) {
   try {
     const response = await fetch(url);
+    if (!response.ok) throw new Error(`Erreur HTTP ${response.status}`);
     const text = await response.text();
     const parsed = icalParser.parseICS(text);
+
     return Object.values(parsed).filter(event => event.type === 'VEVENT');
   } catch (err) {
-    console.error('Erreur récupération ICS :', url, err);
+    console.error('❌ Erreur récupération ICS :', url, err.message);
     return [];
   }
 }
@@ -37,24 +40,24 @@ async function fetchICalEvents(url) {
 // Générer un ICS combiné
 async function generateCombinedICS(res, name, links) {
   const cal = ical({ name });
+
   for (const url of links) {
     const events = await fetchICalEvents(url);
     events.forEach(e => {
-      cal.createEvent({
-        start: e.start,
-        end: e.end,
-        summary: e.summary,
-        description: e.description,
-        location: e.location,
-        url: e.url
-      });
+      if (e.start && e.end) {
+        cal.createEvent({
+          start: e.start,
+          end: e.end,
+          summary: e.summary || 'Réservé',
+          description: e.description || '',
+          location: e.location || '',
+          url: e.url || ''
+        });
+      }
     });
   }
 
-  // 🔹 Ajout des headers nécessaires
-  res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-
+  res.setHeader('Content-Type', 'text/calendar');
   res.send(cal.toString());
 }
 
@@ -62,10 +65,9 @@ async function generateCombinedICS(res, name, links) {
 app.get('/calendar/liva', (req, res) => generateCombinedICS(res, 'LIVA Calendar', LIVA_ICAL_LINKS));
 app.get('/calendar/blom', (req, res) => generateCombinedICS(res, 'BLŌM Calendar', BLOM_ICAL_LINKS));
 
-// Page d’accueil
 app.get('/', (req, res) => {
   res.send(`
-    <h2>Serveur iCal en cours</h2>
+    <h2>✅ Serveur iCal en cours</h2>
     <ul>
       <li><a href="/calendar/liva">Calendrier LIVA</a></li>
       <li><a href="/calendar/blom">Calendrier BLŌM</a></li>
@@ -73,4 +75,4 @@ app.get('/', (req, res) => {
   `);
 });
 
-app.listen(PORT, () => console.log(`✅ Serveur iCal en cours sur le port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Serveur iCal en cours sur le port ${PORT}`));
