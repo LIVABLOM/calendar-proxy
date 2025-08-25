@@ -1,13 +1,14 @@
-// server.js - Version CommonJS (compatible Railway)
+// server.js - Proxy iCal pour LIVA et BLŌM
 
 const express = require('express');
 const ical = require('ical-generator');
-const fetch = require('node-fetch');
+const fetch = require('node-fetch'); // node-fetch v2
 const icalParser = require('node-ical');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const HOST = '0.0.0.0'; // obligatoire pour Railway
 
 // Liens ICS depuis .env
 const LIVA_ICAL_LINKS = [
@@ -26,13 +27,12 @@ const BLOM_ICAL_LINKS = [
 async function fetchICalEvents(url) {
   try {
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`Erreur HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const text = await response.text();
     const parsed = icalParser.parseICS(text);
-
     return Object.values(parsed).filter(event => event.type === 'VEVENT');
   } catch (err) {
-    console.error('❌ Erreur récupération ICS :', url, err.message);
+    console.error('❌ Erreur récupération ICS:', url, err.message);
     return [];
   }
 }
@@ -40,7 +40,6 @@ async function fetchICalEvents(url) {
 // Générer un ICS combiné
 async function generateCombinedICS(res, name, links) {
   const cal = ical({ name });
-
   for (const url of links) {
     const events = await fetchICalEvents(url);
     events.forEach(e => {
@@ -56,7 +55,6 @@ async function generateCombinedICS(res, name, links) {
       }
     });
   }
-
   res.setHeader('Content-Type', 'text/calendar');
   res.send(cal.toString());
 }
@@ -75,4 +73,14 @@ app.get('/', (req, res) => {
   `);
 });
 
-app.listen(PORT, () => console.log(`🚀 Serveur iCal en cours sur le port ${PORT}`));
+// Gestion des erreurs non capturées
+process.on('uncaughtException', err => {
+  console.error('❌ Uncaught Exception:', err);
+});
+process.on('unhandledRejection', err => {
+  console.error('❌ Unhandled Rejection:', err);
+});
+
+app.listen(PORT, HOST, () => {
+  console.log(`🚀 Serveur iCal en écoute sur http://${HOST}:${PORT}`);
+});
