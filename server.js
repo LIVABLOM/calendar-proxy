@@ -26,16 +26,21 @@ const BLOM_ICAL_LINKS = [
 // Fonction pour récupérer et parser un lien ICS
 async function fetchICalEvents(url) {
   try {
+    console.log("Récupération ICS :", url);
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    console.log("Statut réponse :", response.status);
+    if (!response.ok) throw new Error(`Erreur HTTP ${response.status}`);
     const text = await response.text();
+    console.log("Taille du texte récupéré :", text.length);
     const parsed = icalParser.parseICS(text);
+    console.log("Nombre d'événements :", Object.values(parsed).filter(e => e.type === 'VEVENT').length);
     return Object.values(parsed).filter(event => event.type === 'VEVENT');
   } catch (err) {
-    console.error('❌ Erreur récupération ICS:', url, err.message);
+    console.error('❌ Erreur récupération ICS :', url, err.message);
     return [];
   }
 }
+
 
 // Générer un ICS combiné
 async function generateCombinedICS(res, name, links) {
