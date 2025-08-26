@@ -1,13 +1,14 @@
-// server.js - Version CommonJS compatible Railway
+// server.js - Version CommonJS (compatible Railway + Node 18)
 const express = require('express');
 const ical = require('ical-generator');
-const fetch = require('node-fetch');
+const fetch = require('node-fetch'); // version 2.x
 const icalParser = require('node-ical');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Liens ICS depuis .env
 const LIVA_ICAL_LINKS = [
   process.env.LIVA_GOOGLE_ICS,
   process.env.LIVA_AIRBNB_ICS,
@@ -20,27 +21,22 @@ const BLOM_ICAL_LINKS = [
   process.env.BLOM_BOOKING_ICS
 ].filter(Boolean);
 
-// Fonction fetch avec timeout
-async function fetchWithTimeout(url, timeout = 8000) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-
+// Fonction pour récupérer et parser un lien ICS avec logs
+async function fetchICalEvents(url) {
   try {
-    console.log("⏳ Récupération ICS :", url);
-    const response = await fetch(url, { signal: controller.signal });
-    console.log("✅ Statut réponse :", response.status, url);
+    console.log("📥 Récupération ICS :", url);
+    const response = await fetch(url);
+    console.log("🔹 Statut réponse :", response.status);
     if (!response.ok) throw new Error(`Erreur HTTP ${response.status}`);
     const text = await response.text();
-    console.log("📄 Taille du texte récupéré :", text.length);
+    console.log("🔹 Taille du texte récupéré :", text.length);
     const parsed = icalParser.parseICS(text);
     const events = Object.values(parsed).filter(e => e.type === 'VEVENT');
-    console.log("📅 Nombre d'événements :", events.length, url);
+    console.log(`🔹 Nombre d'événements trouvés : ${events.length}`);
     return events;
   } catch (err) {
-    console.error("❌ Erreur récupération ICS :", url, err.message);
+    console.error('❌ Erreur récupération ICS :', url, err.message);
     return [];
-  } finally {
-    clearTimeout(id);
   }
 }
 
@@ -49,7 +45,7 @@ async function generateCombinedICS(res, name, links) {
   const cal = ical({ name });
 
   for (const url of links) {
-    const events = await fetchWithTimeout(url);
+    const events = await fetchICalEvents(url);
     events.forEach(e => {
       if (e.start && e.end) {
         cal.createEvent({
@@ -64,6 +60,7 @@ async function generateCombinedICS(res, name, links) {
     });
   }
 
+  console.log(`✅ ICS combiné généré pour ${name}, total événements : ${cal.events().length}`);
   res.setHeader('Content-Type', 'text/calendar');
   res.send(cal.toString());
 }
