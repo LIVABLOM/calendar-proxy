@@ -1,82 +1,71 @@
-// server.js - Version CommonJS (compatible Railway + Node 18)
-const express = require('express');
-const ical = require('ical-generator');
-const fetch = require('node-fetch'); // version 2.x
-const icalParser = require('node-ical');
-require('dotenv').config();
+import express from "express";
+import fetch from "node-fetch";
+import ical from "ical";
+import cors from "cors";
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
 
-// Liens ICS depuis .env
-const LIVA_ICAL_LINKS = [
-  process.env.LIVA_GOOGLE_ICS,
-  process.env.LIVA_AIRBNB_ICS,
-  process.env.LIVA_BOOKING_ICS
-].filter(Boolean);
+app.use(cors());
 
-const BLOM_ICAL_LINKS = [
-  process.env.BLOM_GOOGLE_ICS,
-  process.env.BLOM_AIRBNB_ICS,
-  process.env.BLOM_BOOKING_ICS
-].filter(Boolean);
+// Liens iCal
+const icalLinks = [
+  { title: "GOOGLE_LIVA", url: "https://calendar.google.com/calendar/ical/25b3ab9fef930d1760a10e762624b8f604389bdbf69d0ad23c98759fee1b1c89%40group.calendar.google.com/private-13c805a19f362002359c4036bf5234d6/basic.ics" },
+  { title: "GOOGLE_BLOM", url: "https://calendar.google.com/calendar/ical/c686866e780e72a89dd094dedc492475386f2e6ee8e22b5a63efe7669d52621b%40group.calendar.google.com/private-a78ad751bafd3b6f19cf5874453e6640/basic.ics" },
+  { title: "AIRBNB_LIVA", url: "https://www.airbnb.fr/calendar/ical/41095534.ics?s=723d983690200ff422703dc7306303de" },
+  { title: "AIRBNB_BLOM", url: "https://www.airbnb.fr/calendar/ical/985569147645507170.ics?s=b9199a1a132a6156fcce597fe4786c1e" },
+  { title: "BOOKING_LIVA", url: "https://ical.booking.com/v1/export?t=30a4b8a1-39a3-4dae-9021-0115bdd5e49d" },
+  { title: "BOOKING_BLOM", url: "https://ical.booking.com/v1/export?t=8b652fed-8787-4a0c-974c-eb139f83b20f" }
+];
 
-// Fonction pour récupérer et parser un lien ICS avec logs
-async function fetchICalEvents(url) {
+let cachedEvents = [];
+
+// Fonction pour récupérer et parser un iCal
+async function fetchICal(link) {
   try {
-    console.log("📥 Récupération ICS :", url);
-    const response = await fetch(url);
-    console.log("🔹 Statut réponse :", response.status);
-    if (!response.ok) throw new Error(`Erreur HTTP ${response.status}`);
-    const text = await response.text();
-    console.log("🔹 Taille du texte récupéré :", text.length);
-    const parsed = icalParser.parseICS(text);
-    const events = Object.values(parsed).filter(e => e.type === 'VEVENT');
-    console.log(`🔹 Nombre d'événements trouvés : ${events.length}`);
+    const res = await fetch(link.url);
+    const text = await res.text();
+    const data = ical.parseICS(text);
+
+    const events = Object.values(data)
+      .filter(e => e.type === "VEVENT")
+      .map(e => ({
+        title: e.summary || "Bloqué",
+        start: e.start,
+        end: e.end,
+        allDay: true,
+        source: link.title
+      }));
+
     return events;
   } catch (err) {
-    console.error('❌ Erreur récupération ICS :', url, err.message);
+    console.error(`Erreur pour ${link.title}:`, err);
     return [];
   }
 }
 
-// Générer un ICS combiné
-async function generateCombinedICS(res, name, links) {
-  const cal = ical({ name });
-
-  for (const url of links) {
-    const events = await fetchICalEvents(url);
-    events.forEach(e => {
-      if (e.start && e.end) {
-        cal.createEvent({
-          start: e.start,
-          end: e.end,
-          summary: e.summary || 'Réservé',
-          description: e.description || '',
-          location: e.location || '',
-          url: e.url || ''
-        });
-      }
-    });
+// Fonction pour mettre à jour tous les événements
+async function refreshEvents() {
+  try {
+    const promises = icalLinks.map(fetchICal);
+    const results = await Promise.all(promises);
+    cachedEvents = results.flat();
+    console.log(`Calendriers mis à jour : ${new Date().toLocaleString()}`);
+  } catch (err) {
+    console.error("Erreur lors de la mise à jour des calendriers :", err);
   }
-
-  console.log(`✅ ICS combiné généré pour ${name}, total événements : ${cal.events().length}`);
-  res.setHeader('Content-Type', 'text/calendar');
-  res.send(cal.toString());
 }
 
-// Routes
-app.get('/calendar/liva', (req, res) => generateCombinedICS(res, 'LIVA Calendar', LIVA_ICAL_LINKS));
-app.get('/calendar/blom', (req, res) => generateCombinedICS(res, 'BLŌM Calendar', BLOM_ICAL_LINKS));
+// Rafraîchissement toutes les 10 minutes
+refreshEvents(); // première récupération
+setInterval(refreshEvents, 10 * 60 * 1000); // toutes les 10 minutes
 
-app.get('/', (req, res) => {
-  res.send(`
-    <h2>✅ Serveur iCal en cours</h2>
-    <ul>
-      <li><a href="/calendar/liva">Calendrier LIVA</a></li>
-      <li><a href="/calendar/blom">Calendrier BLŌM</a></li>
-    </ul>
-  `);
+// Endpoint API pour retourner les événements
+app.get("/api/calendar", (req, res) => {
+  res.json(cachedEvents);
 });
 
-app.listen(PORT, () => console.log(`🚀 Serveur iCal en écoute sur http://0.0.0.0:${PORT}`));
+// Démarrage du serveur
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
