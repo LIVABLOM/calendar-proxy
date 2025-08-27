@@ -61,9 +61,20 @@ refreshEvents(); // première récupération
 setInterval(refreshEvents, 10 * 60 * 1000); // toutes les 10 minutes
 
 // Endpoint API pour retourner les événements
+// Endpoint pour récupérer les événements
 app.get("/api/calendar", (req, res) => {
-  res.json(cachedEvents);
+  const { source } = req.query;
+
+  if (source) {
+    // Filtre uniquement les événements correspondant à la source demandée
+    const filtered = events.filter(event => event.source && event.source.includes(source.toUpperCase()));
+    return res.json(filtered);
+  }
+
+  // Sinon renvoie tout
+  res.json(events);
 });
+
 
 // Démarrage du serveur
 app.listen(PORT, () => {
