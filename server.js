@@ -2,12 +2,14 @@ const express = require("express");
 const fetch = require("node-fetch");
 const ical = require("ical");
 const cors = require("cors");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY); // clé Stripe dans les variables d'environnement
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Autoriser toutes les requêtes CORS
 app.use(cors());
+app.use(express.json()); // Pour parser le body JSON
 
 // URLs iCal pour chaque logement
 const calendars = {
@@ -36,7 +38,7 @@ async function fetchICal(url, logement) {
         summary: ev.summary || "Réservé",
         start: ev.start,
         end: ev.end,
-        logement: logement // On force le logement ici
+        logement
       }));
   } catch (err) {
     console.error("Erreur iCal pour", url, err);
@@ -44,7 +46,7 @@ async function fetchICal(url, logement) {
   }
 }
 
-// Endpoint pour un logement précis (BLŌM ou LIVA)
+// --- Endpoints Calendrier ---
 app.get("/api/reservations/:logement", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
   if (!calendars[logement]) return res.status(404).json({ error: "Logement inconnu" });
@@ -62,7 +64,6 @@ app.get("/api/reservations/:logement", async (req, res) => {
   }
 });
 
-// Endpoint global (optionnel, retourne tout)
 app.get("/api/reservations", async (req, res) => {
   try {
     let events = [];
@@ -79,4 +80,37 @@ app.get("/api/reservations", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Proxy calendrier lancé sur le port ${PORT}`));
+// --- Endpoint Stripe ---
+app.post("/create-checkout-session", async (req, res) => {
+  const { price, nights, date, logement } = req.body;
+
+  if (!price || !nights || !date || !logement) {
+    return res.status(400).json({ error: "Données manquantes" });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      line_items: [{
+        price_data: {
+          currency: "eur",
+          product_data: {
+            name: `Réservation ${logement} le ${date}`,
+          },
+          unit_amount: price * 100,
+        },
+        quantity: nights,
+      }],
+      mode: "payment",
+      success_url: "https://livablom.fr/success.html",
+      cancel_url: "https://livablom.fr/cancel.html",
+    });
+
+    res.json({ id: session.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erreur création session Stripe" });
+  }
+});
+
+app.listen(PORT, () => console.log(`Server lancé sur le port ${PORT}`));
