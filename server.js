@@ -7,7 +7,18 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Autoriser toutes les requêtes CORS
-app.use(cors());
+// ✅ CORS : autoriser explicitement ton domaine
+app.use(cors({
+  origin: [
+    "http://localhost:4000",
+    "http://127.0.0.1:4000",
+    "https://livablom.fr",
+    "https://www.livablom.fr"
+  ],
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"],
+}));
+
 
 // ======================
 // URLs iCal pour chaque logement
@@ -124,3 +135,7 @@ app.get("/api/reservations", async (req, res) => {
 // Lancement serveur
 // ======================
 app.listen(PORT, () => console.log(`✅ Proxy calendrier lancé sur le port ${PORT}`));
+
+
+
+
