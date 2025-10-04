@@ -9,7 +9,9 @@ const PORT = process.env.PORT || 4000;
 // Autoriser toutes les requêtes CORS
 app.use(cors());
 
+// ======================
 // URLs iCal pour chaque logement
+// ======================
 const calendars = {
   LIVA: [
     "https://calendar.google.com/calendar/ical/25b3ab9fef930d1760a10e762624b8f604389bdbf69d0ad23c98759fee1b1c89%40group.calendar.google.com/private-13c805a19f362002359c4036bf5234d6/basic.ics",
@@ -23,31 +25,66 @@ const calendars = {
   ]
 };
 
+// ======================
 // Fonction pour récupérer et parser un iCal
+// ======================
 async function fetchICal(url, logement) {
   try {
-    const res = await fetch(url);
+    console.log(`🔄 Chargement iCal pour ${logement} depuis ${url}`);
+
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36",
+        "Accept": "text/calendar, text/plain, */*"
+      },
+      timeout: 10000
+    });
+
+    if (!res.ok) {
+      console.error(`❌ Erreur HTTP ${res.status} pour ${url}`);
+      return [];
+    }
+
     const data = await res.text();
     const parsed = ical.parseICS(data);
 
-    return Object.values(parsed)
+    const events = Object.values(parsed)
       .filter(ev => ev.start && ev.end)
       .map(ev => ({
-        summary: ev.summary || "Réservé",
+        title: ev.summary || "Réservé",
         start: ev.start,
         end: ev.end,
-        logement: logement // On force le logement ici
+        logement,
+        display: "background",
+        color: "#ff0000"
       }));
+
+    console.log(`✅ ${events.length} réservations trouvées pour ${logement} (${url})`);
+    return events;
+
   } catch (err) {
-    console.error("Erreur iCal pour", url, err);
+    console.error(`❌ Erreur iCal pour ${logement}:`, err.message);
     return [];
   }
 }
 
+// ======================
+// Endpoint de test
+// ======================
+app.get("/", (req, res) => {
+  res.send("🚀 Proxy calendrier LIVABLŌM opérationnel !");
+});
+
+// ======================
 // Endpoint pour un logement précis (BLŌM ou LIVA)
+// ======================
 app.get("/api/reservations/:logement", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
-  if (!calendars[logement]) return res.status(404).json({ error: "Logement inconnu" });
+  if (!calendars[logement]) {
+    return res.status(404).json({ error: "Logement inconnu" });
+  }
 
   try {
     let events = [];
@@ -55,28 +92,35 @@ app.get("/api/reservations/:logement", async (req, res) => {
       const e = await fetchICal(url, logement);
       events = events.concat(e);
     }
+    console.log(`📅 Total: ${events.length} événements fusionnés pour ${logement}`);
     res.json(events);
   } catch (err) {
-    console.error(err);
+    console.error("❌ Erreur serveur:", err);
     res.status(500).json({ error: "Erreur serveur" });
   }
 });
 
-// Endpoint global (optionnel, retourne tout)
+// ======================
+// Endpoint global (optionnel)
+// ======================
 app.get("/api/reservations", async (req, res) => {
   try {
-    let events = [];
+    let allEvents = [];
     for (const logement of Object.keys(calendars)) {
       for (const url of calendars[logement]) {
         const e = await fetchICal(url, logement);
-        events = events.concat(e);
+        allEvents = allEvents.concat(e);
       }
     }
-    res.json(events);
+    console.log(`📊 Total global: ${allEvents.length} événements`);
+    res.json(allEvents);
   } catch (err) {
-    console.error(err);
+    console.error("❌ Erreur globale:", err);
     res.status(500).json({ error: "Erreur serveur" });
   }
 });
 
-app.listen(PORT, () => console.log(`Proxy calendrier lancé sur le port ${PORT}`));
+// ======================
+// Lancement serveur
+// ======================
+app.listen(PORT, () => console.log(`✅ Proxy calendrier lancé sur le port ${PORT}`));
