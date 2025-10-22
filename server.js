@@ -1,16 +1,16 @@
 // ======================
-// Proxy calendrier LIVABLŌM
+// Proxy calendrier LIVABLŌM + iCal dynamique
 // ======================
 
 const express = require("express");
 const fetch = require("node-fetch");
 const ical = require("ical");
+const icalGen = require("ical-generator"); // <- nouveau
 const cors = require("cors");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Autoriser toutes les requêtes CORS
 app.use(cors());
 
 // URLs iCal pour chaque logement
@@ -28,7 +28,7 @@ const calendars = {
 };
 
 // Fonction pour récupérer et parser un iCal
-async function fetchICal(url, logement) {
+async function fetchICal(url) {
   try {
     const res = await fetch(url, {
       headers: {
@@ -38,32 +38,21 @@ async function fetchICal(url, logement) {
         "Accept": "text/calendar, text/plain, */*"
       }
     });
-    if (!res.ok) {
-      console.error(`❌ Erreur fetch iCal ${url}: HTTP ${res.status}`);
-      return [];
-    }
-
+    if (!res.ok) return [];
     const data = await res.text();
     const parsed = ical.parseICS(data);
-
-    // Retourner les événements au format FullCalendar avec fond rouge
-    return Object.values(parsed)
-      .filter(ev => ev.start && ev.end)
-      .map(ev => ({
-        title: ev.summary || "Réservé",
-        start: ev.start,
-        end: ev.end,
-        display: "background",
-        color: "#ff0000",
-        logement
-      }));
+    return Object.values(parsed).filter(ev => ev.start && ev.end).map(ev => ({
+      title: ev.summary || "Réservé",
+      start: ev.start,
+      end: ev.end
+    }));
   } catch (err) {
-    console.error("❌ Erreur iCal pour", url, err);
+    console.error("Erreur iCal pour", url, err);
     return [];
   }
 }
 
-// Endpoint pour un logement précis
+// Endpoint pour récupérer les événements en JSON (comme avant)
 app.get("/api/reservations/:logement", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
   if (!calendars[logement]) return res.status(404).json({ error: "Logement inconnu" });
@@ -71,7 +60,7 @@ app.get("/api/reservations/:logement", async (req, res) => {
   try {
     let events = [];
     for (const url of calendars[logement]) {
-      const e = await fetchICal(url, logement);
+      const e = await fetchICal(url);
       events = events.concat(e);
     }
     res.json(events);
@@ -81,25 +70,38 @@ app.get("/api/reservations/:logement", async (req, res) => {
   }
 });
 
-// Endpoint global (optionnel)
-app.get("/api/reservations", async (req, res) => {
+// ======================
+// Nouveau : générer un iCal dynamique pour Airbnb/Booking
+// ======================
+app.get("/ical/:logement.ics", async (req, res) => {
+  const logement = req.params.logement.toUpperCase();
+  if (!calendars[logement]) return res.status(404).send("Logement inconnu");
+
   try {
     let events = [];
-    for (const logement of Object.keys(calendars)) {
-      for (const url of calendars[logement]) {
-        const e = await fetchICal(url, logement);
-        events = events.concat(e);
-      }
+    for (const url of calendars[logement]) {
+      const e = await fetchICal(url);
+      events = events.concat(e);
     }
-    res.json(events);
+
+    // Création du calendrier iCal
+    const cal = icalGen({ name: `Calendrier ${logement} - LIVABLŌM` });
+    events.forEach(ev => {
+      cal.createEvent({
+        start: ev.start,
+        end: ev.end,
+        summary: ev.title
+      });
+    });
+
+    res.setHeader("Content-Type", "text/calendar");
+    res.send(cal.toString());
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Erreur serveur" });
+    res.status(500).send("Erreur serveur");
   }
 });
 
-// Route test
 app.get("/", (req, res) => res.send("🚀 Proxy calendrier LIVABLŌM opérationnel !"));
 
-// Lancement serveur
 app.listen(PORT, () => console.log(`✅ Proxy calendrier lancé sur le port ${PORT}`));
