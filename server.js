@@ -4,10 +4,9 @@
 
 const express = require("express");
 const fetch = require("node-fetch");
-const ical = require("ical");           // parser
+const ical = require("ical");           // parser des iCal existants
 const icalGen = require("ical-generator"); // générer iCal dynamique
 const cors = require("cors");
-
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -42,18 +41,20 @@ async function fetchICal(url) {
     if (!res.ok) return [];
     const data = await res.text();
     const parsed = ical.parseICS(data);
-    return Object.values(parsed).filter(ev => ev.start && ev.end).map(ev => ({
-      title: ev.summary || "Réservé",
-      start: ev.start,
-      end: ev.end
-    }));
+    return Object.values(parsed)
+      .filter(ev => ev.start && ev.end)
+      .map(ev => ({
+        title: ev.summary || "Réservé",
+        start: ev.start,
+        end: ev.end
+      }));
   } catch (err) {
     console.error("Erreur iCal pour", url, err);
     return [];
   }
 }
 
-// Endpoint pour récupérer les événements en JSON (comme avant)
+// Endpoint JSON pour les réservations
 app.get("/api/reservations/:logement", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
   if (!calendars[logement]) return res.status(404).json({ error: "Logement inconnu" });
@@ -72,12 +73,8 @@ app.get("/api/reservations/:logement", async (req, res) => {
 });
 
 // ======================
-// Nouveau : générer un iCal dynamique pour Airbnb/Booking
+// Endpoint pour générer un iCal dynamique (.ics)
 // ======================
-const ical = require("ical-generator"); // au début du fichier
-
-// ...
-
 app.get("/ical/:logement.ics", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
   if (!calendars[logement]) return res.status(404).send("Logement inconnu");
@@ -89,7 +86,7 @@ app.get("/ical/:logement.ics", async (req, res) => {
       events = events.concat(e);
     }
 
-    // Création du calendrier iCal
+    // Création du calendrier iCal dynamique
     const cal = icalGen({ name: `Calendrier ${logement} - LIVABLŌM` });
     events.forEach(ev => {
       cal.createEvent({
@@ -107,7 +104,8 @@ app.get("/ical/:logement.ics", async (req, res) => {
   }
 });
 
-
+// Route test
 app.get("/", (req, res) => res.send("🚀 Proxy calendrier LIVABLŌM opérationnel !"));
 
+// Lancement serveur
 app.listen(PORT, () => console.log(`✅ Proxy calendrier lancé sur le port ${PORT}`));
