@@ -4,9 +4,10 @@
 
 const express = require("express");
 const fetch = require("node-fetch");
-const ical = require("ical");
-const ical = require("ical-generator"); // <- nouveau
+const ical = require("ical");           // parser
+const icalGen = require("ical-generator"); // générer iCal dynamique
 const cors = require("cors");
+
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -89,7 +90,7 @@ app.get("/ical/:logement.ics", async (req, res) => {
     }
 
     // Création du calendrier iCal
-    const cal = ical({ name: `Calendrier ${logement} - LIVABLŌM` });
+    const cal = icalGen({ name: `Calendrier ${logement} - LIVABLŌM` });
     events.forEach(ev => {
       cal.createEvent({
         start: ev.start,
