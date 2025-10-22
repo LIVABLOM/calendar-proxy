@@ -5,7 +5,7 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const ical = require("ical");           // parser des iCal existants
-const icalGen = require("ical-generator"); // générer iCal dynamique
+const icalGen = require("ical-generator").default; // générer iCal dynamique
 const cors = require("cors");
 
 const app = express();
