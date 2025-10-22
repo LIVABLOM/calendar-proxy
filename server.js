@@ -5,7 +5,7 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const ical = require("ical");
-const icalGen = require("ical-generator"); // <- nouveau
+const ical = require("ical-generator"); // <- nouveau
 const cors = require("cors");
 
 const app = express();
@@ -73,6 +73,10 @@ app.get("/api/reservations/:logement", async (req, res) => {
 // ======================
 // Nouveau : générer un iCal dynamique pour Airbnb/Booking
 // ======================
+const ical = require("ical-generator"); // au début du fichier
+
+// ...
+
 app.get("/ical/:logement.ics", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
   if (!calendars[logement]) return res.status(404).send("Logement inconnu");
@@ -85,7 +89,7 @@ app.get("/ical/:logement.ics", async (req, res) => {
     }
 
     // Création du calendrier iCal
-    const cal = icalGen({ name: `Calendrier ${logement} - LIVABLŌM` });
+    const cal = ical({ name: `Calendrier ${logement} - LIVABLŌM` });
     events.forEach(ev => {
       cal.createEvent({
         start: ev.start,
@@ -101,6 +105,7 @@ app.get("/ical/:logement.ics", async (req, res) => {
     res.status(500).send("Erreur serveur");
   }
 });
+
 
 app.get("/", (req, res) => res.send("🚀 Proxy calendrier LIVABLŌM opérationnel !"));
 
