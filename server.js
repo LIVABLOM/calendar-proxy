@@ -1,3 +1,8 @@
+pool.connect()
+  .then(() => console.log("✅ PostgreSQL connecté !"))
+  .catch(err => console.error("❌ Erreur connexion PostgreSQL :", err));
+
+
 // ======================
 // Proxy calendrier LIVABLŌM (PostgreSQL)
 // ======================
