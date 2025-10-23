@@ -1,5 +1,5 @@
 // ======================
-// Proxy calendrier LIVABLŌM (mise à jour 2025-10-23)
+// Proxy calendrier LIVABLŌM (PostgreSQL)
 // ======================
 
 const express = require("express");
@@ -7,7 +7,8 @@ const fetch = require("node-fetch");
 const ical = require("ical");
 const icalGen = require("ical-generator");
 const cors = require("cors");
-const fs = require("fs");
+const { Pool } = require("pg");
+require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -15,21 +16,33 @@ const PORT = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json());
 
-// URLs iCal pour chaque logement (Airbnb + Booking + Google)
+// ======================
+// Config PostgreSQL
+// ======================
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false } // nécessaire pour Railway
+});
+
+// ======================
+// URLs iCal externes
+// ======================
 const calendars = {
   LIVA: [
-    "https://calendar.google.com/calendar/ical/25b3ab9fef930d1760a10e762624b8f604389bdbf69d0ad23c98759fee1b1c89%40group.calendar.google.com/private-13c805a19f362002359c4036bf5234d6/basic.ics",
-    "https://www.airbnb.fr/calendar/ical/41095534.ics?s=723d983690200ff422703dc7306303de",
-    "https://ical.booking.com/v1/export?t=30a4b8a1-39a3-4dae-9021-0115bdd5e49d"
+    process.env.LIVA_GOOGLE_ICS,
+    process.env.LIVA_AIRBNB_ICS,
+    process.env.LIVA_BOOKING_ICS
   ],
   BLOM: [
-    "https://calendar.google.com/calendar/ical/c686866e780e72a89dd094dedc492475386f2e6ee8e22b5a63efe7669d52621b%40group.calendar.google.com/private-a78ad751bafd3b6f19cf5874453e6640/basic.ics",
-    "https://www.airbnb.fr/calendar/ical/985569147645507170.ics?s=b9199a1a132a6156fcce597fe4786c1e",
-    "https://ical.booking.com/v1/export?t=8b652fed-8787-4a0c-974c-eb139f83b20f"
+    process.env.BLOM_GOOGLE_ICS,
+    process.env.BLOM_AIRBNB_ICS,
+    process.env.BLOM_BOOKING_ICS
   ]
 };
 
-// Fonction pour récupérer et parser un iCal externe
+// ======================
+// Fonction fetch iCal externe
+// ======================
 async function fetchICal(url) {
   try {
     const res = await fetch(url, {
@@ -61,9 +74,9 @@ async function fetchICal(url) {
 }
 
 // ======================
-// ➕ Ajouter une réservation (depuis ton site)
+// POST ajouter réservation depuis le site
 // ======================
-app.post("/api/add-reservation", (req, res) => {
+app.post("/api/add-reservation", async (req, res) => {
   const { logement, start, end, title } = req.body;
 
   if (!logement || !start || !end) {
@@ -71,21 +84,16 @@ app.post("/api/add-reservation", (req, res) => {
   }
 
   try {
-    const filePath = "reservations.json";
-    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    const key = logement.toUpperCase();
+    const query = `
+      INSERT INTO reservations (logement, start, "end", title)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id
+    `;
+    const values = [logement.toUpperCase(), start, end, title || "Réservé (site LIVABLŌM)"];
+    const result = await pool.query(query, values);
 
-    if (!data[key]) data[key] = [];
-
-    data[key].push({
-      title: title || "Réservé (site LIVABLŌM)",
-      start,
-      end
-    });
-
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    console.log(`✅ Nouvelle réservation ajoutée pour ${key}: ${start} → ${end}`);
-    res.json({ success: true });
+    console.log(`✅ Nouvelle réservation ajoutée pour ${logement}: ${start} → ${end}`);
+    res.json({ success: true, id: result.rows[0].id });
   } catch (err) {
     console.error("❌ Erreur ajout réservation :", err);
     res.status(500).json({ error: "Erreur serveur" });
@@ -93,7 +101,7 @@ app.post("/api/add-reservation", (req, res) => {
 });
 
 // ======================
-// 📅 Génération iCal dynamique (pour Airbnb / Booking)
+// GET générer iCal dynamique
 // ======================
 app.get("/ical/:logement.ics", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
@@ -102,21 +110,20 @@ app.get("/ical/:logement.ics", async (req, res) => {
   try {
     let events = [];
 
-    // Récupérer les événements externes (Airbnb, Booking, Google)
+    // 1️⃣ Récupérer les événements externes
     for (const url of calendars[logement]) {
       const e = await fetchICal(url);
       events = events.concat(e);
     }
 
-    // Ajouter les réservations locales (du site)
-    const filePath = "reservations.json";
-    if (fs.existsSync(filePath)) {
-      const localData = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-      const localReservations = localData[logement] || [];
-      events = events.concat(localReservations);
-    }
+    // 2️⃣ Ajouter les réservations locales depuis PostgreSQL
+    const dbRes = await pool.query(
+      `SELECT logement, start, "end", title FROM reservations WHERE logement=$1`,
+      [logement]
+    );
+    events = events.concat(dbRes.rows);
 
-    // Générer le fichier iCal
+    // 3️⃣ Générer le fichier iCal
     const cal = icalGen({
       name: `Calendrier LIVABLŌM - ${logement}`,
       timezone: "Europe/Paris"
@@ -139,9 +146,11 @@ app.get("/ical/:logement.ics", async (req, res) => {
 });
 
 // ======================
-// Route de test
+// Route test
 // ======================
-app.get("/", (req, res) => res.send("🚀 Proxy calendrier LIVABLŌM opérationnel avec iCal bidirectionnel !"));
+app.get("/", (req, res) =>
+  res.send("🚀 Proxy calendrier LIVABLŌM opérationnel avec iCal + PostgreSQL !")
+);
 
 // ======================
 // Lancement serveur
