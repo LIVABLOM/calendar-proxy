@@ -11,24 +11,23 @@ const { Pool } = require("pg");
 require("dotenv").config();
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 8080;
 
 app.use(cors());
 app.use(express.json());
 
 // ======================
-// Config PostgreSQL
+// Config PostgreSQL (Railway Public URL)
 // ======================
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // nécessaire pour Railway
+  ssl: { rejectUnauthorized: false }
 });
 
 // Test connexion PostgreSQL
 pool.connect()
   .then(() => console.log("✅ PostgreSQL connecté !"))
   .catch(err => console.error("❌ Erreur connexion PostgreSQL :", err));
-
 
 // ======================
 // URLs iCal externes
@@ -52,10 +51,7 @@ const calendars = {
 async function fetchICal(url) {
   try {
     const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        Accept: "text/calendar, text/plain, */*"
-      }
+      headers: { "User-Agent": "Mozilla/5.0", Accept: "text/calendar, text/plain, */*" }
     });
 
     if (!res.ok) {
@@ -68,11 +64,7 @@ async function fetchICal(url) {
 
     return Object.values(parsed)
       .filter(ev => ev.start && ev.end)
-      .map(ev => ({
-        title: ev.summary || "Réservé",
-        start: ev.start,
-        end: ev.end
-      }));
+      .map(ev => ({ title: ev.summary || "Réservé", start: ev.start, end: ev.end }));
   } catch (err) {
     console.error("❌ Erreur iCal pour", url, err);
     return [];
@@ -84,10 +76,7 @@ async function fetchICal(url) {
 // ======================
 app.post("/api/add-reservation", async (req, res) => {
   const { logement, start, end, title } = req.body;
-
-  if (!logement || !start || !end) {
-    return res.status(400).json({ error: "Champs manquants" });
-  }
+  if (!logement || !start || !end) return res.status(400).json({ error: "Champs manquants" });
 
   try {
     const query = `
@@ -130,10 +119,7 @@ app.get("/ical/:logement.ics", async (req, res) => {
     events = events.concat(dbRes.rows);
 
     // 3️⃣ Générer le fichier iCal
-    const cal = icalGen({
-      name: `Calendrier LIVABLŌM - ${logement}`,
-      timezone: "Europe/Paris"
-    });
+    const cal = icalGen({ name: `Calendrier LIVABLŌM - ${logement}`, timezone: "Europe/Paris" });
 
     for (const ev of events) {
       cal.createEvent({
@@ -154,9 +140,7 @@ app.get("/ical/:logement.ics", async (req, res) => {
 // ======================
 // Route test
 // ======================
-app.get("/", (req, res) =>
-  res.send("🚀 Proxy calendrier LIVABLŌM opérationnel avec iCal + PostgreSQL !")
-);
+app.get("/", (req, res) => res.send("🚀 Proxy calendrier LIVABLŌM opérationnel avec iCal + PostgreSQL !"));
 
 // ======================
 // Lancement serveur
