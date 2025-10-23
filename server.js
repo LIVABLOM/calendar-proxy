@@ -1,8 +1,3 @@
-pool.connect()
-  .then(() => console.log("✅ PostgreSQL connecté !"))
-  .catch(err => console.error("❌ Erreur connexion PostgreSQL :", err));
-
-
 // ======================
 // Proxy calendrier LIVABLŌM (PostgreSQL)
 // ======================
@@ -28,6 +23,12 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false } // nécessaire pour Railway
 });
+
+// Test connexion PostgreSQL
+pool.connect()
+  .then(() => console.log("✅ PostgreSQL connecté !"))
+  .catch(err => console.error("❌ Erreur connexion PostgreSQL :", err));
+
 
 // ======================
 // URLs iCal externes
