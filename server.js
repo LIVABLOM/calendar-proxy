@@ -172,12 +172,27 @@ app.post("/api/add-reservation", async (req, res) => {
   }
 });
 
-// ----------------------
-// Route test
-// ----------------------
+/// ✅ Nouvelle route pour recevoir les réservations depuis livablom-stripe
+app.post("/api/add-reservation", async (req, res) => {
+  const { logement, date_debut, date_fin, title } = req.body;
+  if (!logement || !date_debut || !date_fin)
+    return res.status(400).json({ error: "Données manquantes" });
+
+  try {
+    await pool.query(
+      'INSERT INTO reservations (logement, start, "end", title) VALUES ($1, $2, $3, $4)',
+      [logement, date_debut, date_fin, title || "Réservation via Stripe"]
+    );
+    console.log("✅ Réservation ajoutée depuis Stripe:", logement);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Erreur ajout BDD proxy:", err);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
+// 🧭 Route de test
 app.get("/", (req, res) => res.send("🚀 Proxy calendrier LIVABLŌM opérationnel !"));
 
-// ----------------------
-// Lancement serveur
-// ----------------------
+// ✅ Lancement du serveur
 app.listen(PORT, () => console.log(`✅ Proxy calendrier lancé sur le port ${PORT}`));
