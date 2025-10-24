@@ -10,11 +10,14 @@ const cors = require("cors");
 const { Pool } = require("pg");
 require("dotenv").config();
 
-const app = express();
-const PORT = process.env.PORT || 8080;
+const app = express(); // <-- création de ton application Express ici
 
+// ✅ Correction encodage UTF-8 pour les requêtes JSON
+app.use(express.json({ type: "application/json; charset=utf-8" }));
+
+// (ensuite tu peux garder les autres middlewares habituels)
 app.use(cors());
-app.use(express.json());
+
 
 // ======================
 // Config PostgreSQL (Railway Public URL)
