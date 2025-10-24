@@ -95,6 +95,18 @@ app.post("/api/add-reservation", async (req, res) => {
   }
 });
 
+// 🟢 Récupérer toutes les réservations
+app.get("/api/reservations", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM reservations ORDER BY start DESC");
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Erreur récupération réservations :", err);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
+
 // ======================
 // GET générer iCal dynamique
 // ======================
