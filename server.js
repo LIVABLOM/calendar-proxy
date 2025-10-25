@@ -125,6 +125,8 @@ app.get("/api/reservations/:logement", async (req, res) => {
 // ----------------------
 app.get("/ical/:logement.ics", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
+  console.log("🔔 Request iCal pour logement :", req.params.logement);
+
   try {
     const result = await pool.query(
       'SELECT id, title, start, "end" FROM reservations WHERE logement = $1 ORDER BY start ASC',
@@ -166,7 +168,8 @@ app.get("/ical/:logement.ics", async (req, res) => {
 function formatPGTimestamp(d) {
   const pad = n => String(n).padStart(2, "0");
   const Y = d.getFullYear();
-  const M = pad(d.getMonth() + 1);
+  const M = pad(d.getMonth() + 1);endpoint
+
   const D = pad(d.getDate());
   const h = pad(d.getHours());
   const m = pad(d.getMinutes());
