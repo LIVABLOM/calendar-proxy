@@ -201,8 +201,9 @@ app.post("/api/add-reservation", async (req, res) => {
 
     // Si rawStart/rawEnd sont date-only (YYYY-MM-DD) on met heures par défaut
     // Arrivée 15:00, départ 10:00
-    const startDate = parseDateInput(rawStart, 15, 0);
-    const endDate = parseDateInput(rawEnd, 10, 0);
+    const startDate = parseDateInput(rawStart, 0, 0);   // 00:00
+    const endDate = parseDateInput(rawEnd, 23, 59);     // 23:59
+
 
     const startTime = formatPGTimestamp(startDate);
     const endTime = formatPGTimestamp(endDate);
