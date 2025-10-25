@@ -133,22 +133,35 @@ app.get("/ical/:logement.ics", async (req, res) => {
   try {
     const events = await getAllReservations(logement);
 
-    const cal = icalGen({ name: `Calendrier ${logement} - LIVABLŌM` });
+    const cal = icalGen({
+      name: `Calendrier ${logement} - LIVABLŌM`,
+      timezone: 'Europe/Paris',   // important pour Airbnb/Booking
+    });
+
     events.forEach(ev => {
+      // Créer des dates "journée entière" pour Airbnb/Booking
+      let start = new Date(ev.start);
+      let end = new Date(ev.end);
+
+      start.setHours(0, 0, 0, 0);          // début 00:00
+      end.setHours(23, 59, 59, 999);       // fin 23:59
+
       cal.createEvent({
-        start: ev.start,
-        end: ev.end,
+        start,
+        end,
         summary: ev.title
       });
     });
 
     res.setHeader("Content-Type", "text/calendar");
     res.send(cal.toString());
+
   } catch (err) {
     console.error(err);
     res.status(500).send("Erreur serveur");
   }
 });
+
 
 // ✅ Route unique pour recevoir les réservations (Stripe ou site)
 // Utilitaire : formate une date en 'YYYY-MM-DD HH:MM:SS'
