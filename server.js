@@ -128,27 +128,45 @@ app.get("/api/reservations/:logement", async (req, res) => {
 // ----------------------
 // Endpoint pour générer iCal dynamique (.ics)
 // ----------------------
+const ical = require("ical-generator");
+
+// ✅ Génération dynamique du calendrier .ics
 app.get("/ical/:logement.ics", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
-  try {
-    const events = await getAllReservations(logement);
 
-    const cal = icalGen({ name: `Calendrier ${logement} - LIVABLŌM` });
-    events.forEach(ev => {
+  try {
+    // On récupère toutes les réservations dans la base
+    const result = await pool.query(
+      'SELECT id, logement, start, "end", title FROM reservations WHERE logement = $1 ORDER BY start ASC',
+      [logement]
+    );
+
+    // Création du calendrier iCal
+    const cal = ical({
+      name: `Calendrier ${logement} - LIVABLŌM`,
+      timezone: "Europe/Paris",
+      prodId: { company: "LIVABLŌM", product: "CalendarProxy" },
+    });
+
+    // Ajout des événements depuis la base
+    result.rows.forEach(r => {
       cal.createEvent({
-        start: ev.start,
-        end: ev.end,
-        summary: ev.title
+        start: new Date(r.start),
+        end: new Date(r.end),
+        summary: r.title || `Réservé ${logement}`,
+        description: `Réservation ${logement}`,
+        uid: `livablom-${r.id}@calendar-proxy`,
       });
     });
 
-    res.setHeader("Content-Type", "text/calendar");
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
     res.send(cal.toString());
   } catch (err) {
-    console.error(err);
+    console.error("❌ Erreur génération iCal:", err);
     res.status(500).send("Erreur serveur");
   }
 });
+
 
 // ✅ Route unique pour recevoir les réservations (Stripe ou site)
 // Utilitaire : formate une date en 'YYYY-MM-DD HH:MM:SS'
