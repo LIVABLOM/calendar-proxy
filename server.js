@@ -157,31 +157,36 @@ app.post("/api/add-reservation", async (req, res) => {
 
   // Accepte les deux formats : {start, end} ou {date_debut, date_fin}
   const logement = req.body.logement;
-  const start = req.body.start || req.body.date_debut;
-  const end = req.body.end || req.body.date_fin;
+  const rawStart = req.body.start || req.body.date_debut;
+  const rawEnd = req.body.end || req.body.date_fin;
   const title = req.body.title || "Réservation via Stripe / Site";
 
-  if (!logement || !start || !end) {
+  if (!logement || !rawStart || !rawEnd) {
     console.warn("⚠️ Données manquantes :", req.body);
     return res.status(400).json({ error: "Données manquantes" });
   }
 
   try {
+    // 🕒 Ajout automatique des heures (arrivée / départ)
+    const startTime = `${rawStart} 15:00:00`; // arrivée à 15h
+    const endTime = `${rawEnd} 10:00:00`;     // départ à 10h
+
     const query = `
       INSERT INTO reservations (logement, start, "end", title)
       VALUES ($1, $2, $3, $4)
       RETURNING id
     `;
-    const values = [logement.toUpperCase(), start, end, title];
+    const values = [logement.toUpperCase(), startTime, endTime, title];
     const result = await pool.query(query, values);
 
-    console.log(`✅ Réservation ajoutée pour ${logement}: ${start} → ${end}`);
+    console.log(`✅ Réservation ajoutée pour ${logement}: ${startTime} → ${endTime}`);
     res.json({ success: true, id: result.rows[0].id });
   } catch (err) {
     console.error("❌ Erreur ajout BDD proxy:", err);
     res.status(500).json({ error: "Erreur serveur" });
   }
 });
+
 
 
 // 🧭 Route de test
