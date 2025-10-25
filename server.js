@@ -151,39 +151,75 @@ app.get("/ical/:logement.ics", async (req, res) => {
 });
 
 // ✅ Route unique pour recevoir les réservations (Stripe ou site)
+// Utilitaire : formate une date en 'YYYY-MM-DD HH:MM:SS'
+function formatPGTimestamp(d) {
+  const pad = n => String(n).padStart(2, "0");
+  const Y = d.getFullYear();
+  const M = pad(d.getMonth() + 1);
+  const D = pad(d.getDate());
+  const h = pad(d.getHours());
+  const m = pad(d.getMinutes());
+  const s = pad(d.getSeconds());
+  return `${Y}-${M}-${D} ${h}:${m}:${s}`;
+}
+
+// Utilitaire : construit un Date à partir d'une entrée (ISO date, date-only, etc.)
+function parseDateInput(input, defaultHour = 0, defaultMinute = 0) {
+  // si input déjà Date
+  if (input instanceof Date && !isNaN(input)) return input;
+  // si format YYYY-MM-DD (date-only)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    const [Y, M, D] = input.split("-").map(Number);
+    return new Date(Y, M - 1, D, defaultHour, defaultMinute, 0);
+  }
+  // sinon essaie new Date(input) pour ISO ou autre
+  const d = new Date(input);
+  if (!isNaN(d)) return d;
+  // fallback : today with defaultHour
+  const now = new Date();
+  now.setHours(defaultHour, defaultMinute, 0, 0);
+  return now;
+}
+
+// Route fusionnée et robuste
 app.post("/api/add-reservation", async (req, res) => {
   console.log("📩 Requête reçue sur /api/add-reservation");
   console.log("🧠 Corps reçu :", req.body);
 
-  // Accepte les deux formats : {start, end} ou {date_debut, date_fin}
-  const logement = req.body.logement;
+  const logementRaw = req.body.logement;
   const rawStart = req.body.start || req.body.date_debut;
   const rawEnd = req.body.end || req.body.date_fin;
   const title = req.body.title || "Réservation via Stripe / Site";
 
-  if (!logement || !rawStart || !rawEnd) {
+  if (!logementRaw || !rawStart || !rawEnd) {
     console.warn("⚠️ Données manquantes :", req.body);
     return res.status(400).json({ error: "Données manquantes" });
   }
 
   try {
-    // 🕒 Ajout automatique des heures (arrivée / départ)
-    const startTime = `${rawStart} 15:00:00`; // arrivée à 15h
-    const endTime = `${rawEnd} 10:00:00`;     // départ à 10h
+    const logement = String(logementRaw).toUpperCase();
+
+    // Si rawStart/rawEnd sont date-only (YYYY-MM-DD) on met heures par défaut
+    // Arrivée 15:00, départ 10:00
+    const startDate = parseDateInput(rawStart, 15, 0);
+    const endDate = parseDateInput(rawEnd, 10, 0);
+
+    const startTime = formatPGTimestamp(startDate);
+    const endTime = formatPGTimestamp(endDate);
 
     const query = `
       INSERT INTO reservations (logement, start, "end", title)
       VALUES ($1, $2, $3, $4)
       RETURNING id
     `;
-    const values = [logement.toUpperCase(), startTime, endTime, title];
+    const values = [logement, startTime, endTime, title];
     const result = await pool.query(query, values);
 
     console.log(`✅ Réservation ajoutée pour ${logement}: ${startTime} → ${endTime}`);
-    res.json({ success: true, id: result.rows[0].id });
+    return res.json({ success: true, id: result.rows[0].id });
   } catch (err) {
     console.error("❌ Erreur ajout BDD proxy:", err);
-    res.status(500).json({ error: "Erreur serveur" });
+    return res.status(500).json({ error: "Erreur serveur" });
   }
 });
 
