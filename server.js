@@ -4,16 +4,20 @@
 
 const express = require("express");
 const fetch = require("node-fetch");
-const icalGen = require("ical-generator");
+const ical = require("ical");           // parser des iCal externes
+const icalGen = require("ical-generator").default; // générer iCal dynamique
 const cors = require("cors");
 const { Pool } = require("pg");
 require("dotenv").config();
 
 const app = express();
-app.use(cors());
-app.use(express.json({ type: "application/json; charset=utf-8" }));
+app.use(express.json()); // indispensable pour parser le JSON envoyé par livablom-stripe
 
 const PORT = process.env.PORT || 4000;
+
+// ✅ Middleware
+app.use(cors());
+app.use(express.json({ type: "application/json; charset=utf-8" }));
 
 // ----------------------
 // PostgreSQL
@@ -50,13 +54,15 @@ async function fetchICal(url) {
   try {
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+          "(KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36",
         "Accept": "text/calendar, text/plain, */*"
       }
     });
     if (!res.ok) return [];
     const data = await res.text();
-    const parsed = require("ical").parseICS(data);
+    const parsed = ical.parseICS(data);
     return Object.values(parsed)
       .filter(ev => ev.start && ev.end)
       .map(ev => ({
@@ -76,11 +82,10 @@ async function fetchICal(url) {
 async function fetchInternalReservations(logement) {
   try {
     const res = await pool.query(
-      'SELECT id, title, start, "end" FROM reservations WHERE logement = $1 ORDER BY start ASC',
+      'SELECT title, start, "end" FROM reservations WHERE logement = $1',
       [logement.toUpperCase()]
     );
     return res.rows.map(r => ({
-      id: r.id,
       title: r.title,
       start: new Date(r.start),
       end: new Date(r.end)
@@ -125,97 +130,53 @@ app.get("/api/reservations/:logement", async (req, res) => {
 // ----------------------
 app.get("/ical/:logement.ics", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
-  console.log("🔔 Request iCal pour logement :", req.params.logement);
-
   try {
-    const result = await pool.query(
-      'SELECT id, title, start, "end" FROM reservations WHERE logement = $1 ORDER BY start ASC',
-      [logement]
-    );
+    const events = await getAllReservations(logement);
 
-    console.log("📄 Réservations pour ICS :", result.rows);
-
-    const cal = icalGen({
-      name: `Calendrier ${logement} - LIVABLŌM`,
-      timezone: "Europe/Paris",
-      prodId: { company: "LIVABLŌM", product: "CalendarProxy" },
+    const cal = icalGen({ name: `Calendrier ${logement} - LIVABLŌM` });
+    events.forEach(ev => {
+      cal.createEvent({
+        start: ev.start,
+        end: ev.end,
+        summary: ev.title
+      });
     });
 
-    result.rows.forEach(r => {
-  cal.createEvent({
-    start: new Date(r.start),
-    end: new Date(new Date(r.end).getTime() + 24*60*60*1000), // +1 jour pour que fin soit exclusive
-    summary: r.title || `Réservé ${logement}`,
-    description: `Réservation ${logement}`,
-    uid: `livablom-${r.id}@calendar-proxy`,
-  });
-});
-
-
-    console.log("🗓️ Événements ICS générés :", cal.events().length);
-
-    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.setHeader("Content-Type", "text/calendar");
     res.send(cal.toString());
   } catch (err) {
-    console.error("❌ Erreur génération iCal:", err);
+    console.error(err);
     res.status(500).send("Erreur serveur");
   }
 });
 
-// ----------------------
-// Route pour ajouter une réservation
-// ----------------------
-function formatPGTimestamp(d) {
-  const pad = n => String(n).padStart(2, "0");
-  const Y = d.getFullYear();
-  const M = pad(d.getMonth() + 1);endpoint
-
-  const D = pad(d.getDate());
-  const h = pad(d.getHours());
-  const m = pad(d.getMinutes());
-  const s = pad(d.getSeconds());
-  return `${Y}-${M}-${D} ${h}:${m}:${s}`;
-}
-
-function parseDateInput(input, defaultHour = 0, defaultMinute = 0) {
-  if (input instanceof Date && !isNaN(input)) return input;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
-    const [Y, M, D] = input.split("-").map(Number);
-    return new Date(Y, M - 1, D, defaultHour, defaultMinute, 0);
-  }
-  const d = new Date(input);
-  if (!isNaN(d)) return d;
-  const now = new Date();
-  now.setHours(defaultHour, defaultMinute, 0, 0);
-  return now;
-}
-
+// ✅ Route unique pour recevoir les réservations (Stripe ou site)
 app.post("/api/add-reservation", async (req, res) => {
-  console.log("📩 Requête reçue :", req.body);
+  console.log("📩 Requête reçue sur /api/add-reservation");
+  console.log("🧠 Corps reçu :", req.body);
 
-  const logementRaw = req.body.logement;
+  // Accepte les deux formats : {start, end} ou {date_debut, date_fin}
+  const logement = req.body.logement;
   const rawStart = req.body.start || req.body.date_debut;
   const rawEnd = req.body.end || req.body.date_fin;
   const title = req.body.title || "Réservation via Stripe / Site";
 
-  if (!logementRaw || !rawStart || !rawEnd) {
+  if (!logement || !rawStart || !rawEnd) {
+    console.warn("⚠️ Données manquantes :", req.body);
     return res.status(400).json({ error: "Données manquantes" });
   }
 
   try {
-    const logement = String(logementRaw).toUpperCase();
-    const startDate = parseDateInput(rawStart, 0, 0);
-    const endDate = parseDateInput(rawEnd, 23, 59);
-
-    const startTime = formatPGTimestamp(startDate);
-    const endTime = formatPGTimestamp(endDate);
+    // 🕒 Ajout automatique des heures (arrivée / départ)
+    const startTime = `${rawStart} 15:00:00`; // arrivée à 15h
+    const endTime = `${rawEnd} 10:00:00`;     // départ à 10h
 
     const query = `
       INSERT INTO reservations (logement, start, "end", title)
       VALUES ($1, $2, $3, $4)
       RETURNING id
     `;
-    const values = [logement, startTime, endTime, title];
+    const values = [logement.toUpperCase(), startTime, endTime, title];
     const result = await pool.query(query, values);
 
     console.log(`✅ Réservation ajoutée pour ${logement}: ${startTime} → ${endTime}`);
@@ -226,12 +187,10 @@ app.post("/api/add-reservation", async (req, res) => {
   }
 });
 
-// ----------------------
-// Route de test
-// ----------------------
+
+
+// 🧭 Route de test
 app.get("/", (req, res) => res.send("🚀 Proxy calendrier LIVABLŌM opérationnel !"));
 
-// ----------------------
-// Lancement serveur
-// ----------------------
+// ✅ Lancement du serveur
 app.listen(PORT, () => console.log(`✅ Proxy calendrier lancé sur le port ${PORT}`));
