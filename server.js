@@ -129,18 +129,21 @@ app.get("/api/reservations/:logement", async (req, res) => {
 // Endpoint pour générer iCal dynamique (.ics)
 // ----------------------
 // ✅ Génération dynamique du calendrier .ics
+// ----------------------
+// Endpoint pour générer iCal dynamique (.ics)
+// ----------------------
 app.get("/ical/:logement.ics", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
 
   try {
-    // On récupère toutes les réservations dans la base
+    // On récupère toutes les réservations internes dans la base
     const result = await pool.query(
       'SELECT id, logement, start, "end", title FROM reservations WHERE logement = $1 ORDER BY start ASC',
       [logement]
     );
 
     // Création du calendrier iCal
-    const cal = ical({
+    const cal = icalGen({
       name: `Calendrier ${logement} - LIVABLŌM`,
       timezone: "Europe/Paris",
       prodId: { company: "LIVABLŌM", product: "CalendarProxy" },
