@@ -11,6 +11,8 @@ const { Pool } = require("pg");
 require("dotenv").config();
 
 const app = express();
+app.use(express.json()); // indispensable pour parser le JSON envoyé par livablom-stripe
+
 const PORT = process.env.PORT || 4000;
 
 // ✅ Middleware
