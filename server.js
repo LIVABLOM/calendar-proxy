@@ -148,12 +148,21 @@ app.get("/ical/:logement.ics", async (req, res) => {
   }
 });
 
-// ----------------------
-// POST ajouter réservation depuis le site
-// ----------------------
+// ✅ Route unique pour recevoir les réservations (Stripe ou site)
 app.post("/api/add-reservation", async (req, res) => {
-  const { logement, start, end, title } = req.body;
-  if (!logement || !start || !end) return res.status(400).json({ error: "Champs manquants" });
+  console.log("📩 Requête reçue sur /api/add-reservation");
+  console.log("🧠 Corps reçu :", req.body);
+
+  // Accepte les deux formats : {start, end} ou {date_debut, date_fin}
+  const logement = req.body.logement;
+  const start = req.body.start || req.body.date_debut;
+  const end = req.body.end || req.body.date_fin;
+  const title = req.body.title || "Réservation via Stripe / Site";
+
+  if (!logement || !start || !end) {
+    console.warn("⚠️ Données manquantes :", req.body);
+    return res.status(400).json({ error: "Données manquantes" });
+  }
 
   try {
     const query = `
@@ -161,35 +170,17 @@ app.post("/api/add-reservation", async (req, res) => {
       VALUES ($1, $2, $3, $4)
       RETURNING id
     `;
-    const values = [logement.toUpperCase(), start, end, title || "Réservé (site LIVABLŌM)"];
+    const values = [logement.toUpperCase(), start, end, title];
     const result = await pool.query(query, values);
 
-    console.log(`✅ Nouvelle réservation ajoutée pour ${logement}: ${start} → ${end}`);
+    console.log(`✅ Réservation ajoutée pour ${logement}: ${start} → ${end}`);
     res.json({ success: true, id: result.rows[0].id });
-  } catch (err) {
-    console.error("❌ Erreur ajout réservation :", err);
-    res.status(500).json({ error: "Erreur serveur" });
-  }
-});
-
-/// ✅ Nouvelle route pour recevoir les réservations depuis livablom-stripe
-app.post("/api/add-reservation", async (req, res) => {
-  const { logement, date_debut, date_fin, title } = req.body;
-  if (!logement || !date_debut || !date_fin)
-    return res.status(400).json({ error: "Données manquantes" });
-
-  try {
-    await pool.query(
-      'INSERT INTO reservations (logement, start, "end", title) VALUES ($1, $2, $3, $4)',
-      [logement, date_debut, date_fin, title || "Réservation via Stripe"]
-    );
-    console.log("✅ Réservation ajoutée depuis Stripe:", logement);
-    res.json({ success: true });
   } catch (err) {
     console.error("❌ Erreur ajout BDD proxy:", err);
     res.status(500).json({ error: "Erreur serveur" });
   }
 });
+
 
 // 🧭 Route de test
 app.get("/", (req, res) => res.send("🚀 Proxy calendrier LIVABLŌM opérationnel !"));
