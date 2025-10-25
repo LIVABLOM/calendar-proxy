@@ -4,7 +4,7 @@
 
 const express = require("express");
 const fetch = require("node-fetch");
-const icalGen = require("ical-generator"); // pas de .default
+const icalGen = require("ical-generator");
 const cors = require("cors");
 const { Pool } = require("pg");
 require("dotenv").config();
