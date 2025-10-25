@@ -141,6 +141,8 @@ app.get("/ical/:logement.ics", async (req, res) => {
       'SELECT id, logement, start, "end", title FROM reservations WHERE logement = $1 ORDER BY start ASC',
       [logement]
     );
+    console.log("Réservations pour ICS :", result.rows);
+
 
     // Création du calendrier iCal
     const cal = icalGen({
