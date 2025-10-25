@@ -6,7 +6,7 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const ical = require("ical"); // parser iCal externes (lecture)
-const icalGen = require("ical-generator"); // génération iCal (écriture)
+const icalGen = require("ical-generator").default // génération iCal (écriture)
 const cors = require("cors");
 const { Pool } = require("pg");
 require("dotenv").config();
