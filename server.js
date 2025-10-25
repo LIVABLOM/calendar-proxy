@@ -135,20 +135,19 @@ app.get("/ical/:logement.ics", async (req, res) => {
   const logement = req.params.logement.toUpperCase();
 
   try {
-    // On récupère toutes les réservations dans la base
+    // On récupère les réservations de la BDD
     const result = await pool.query(
       'SELECT id, logement, start, "end", title FROM reservations WHERE logement = $1 ORDER BY start ASC',
       [logement]
     );
 
-    // Création du calendrier iCal
     const cal = ical({
-      name: `Calendrier ${logement} - LIVABLŌM`,
+      name: `Calendrier ${logement}`,
       timezone: "Europe/Paris",
       prodId: { company: "LIVABLŌM", product: "CalendarProxy" },
     });
 
-    // Ajout des événements depuis la base
+    // On ajoute les réservations dans le fichier iCal
     result.rows.forEach(r => {
       cal.createEvent({
         start: new Date(r.start),
