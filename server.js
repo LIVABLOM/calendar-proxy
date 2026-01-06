@@ -43,20 +43,13 @@ function normalizeLogementName(s) {
 }
 
 // ----------------------
-// URLs iCal pour chaque logement (depuis .env)
+// URLs iCal pour chaque logement (TEST : iCal externes désactivés)
 // ----------------------
 const calendars = {
-  LIVA: [
-    process.env.LIVA_GOOGLE_ICS,
-    process.env.LIVA_AIRBNB_ICS,
-    process.env.LIVA_BOOKING_ICS
-  ].filter(Boolean),
-  BLOM: [
-    process.env.BLOM_GOOGLE_ICS,
-    process.env.BLOM_AIRBNB_ICS,
-    process.env.BLOM_BOOKING_ICS
-  ].filter(Boolean)
+  LIVA: [],
+  BLOM: []
 };
+
 
 // ----------------------
 // Fonction pour récupérer et parser un iCal externe (Airbnb/Booking/Google)
