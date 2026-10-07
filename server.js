@@ -1,107 +1,265 @@
-'use strict';
-const express = require('express');
-const fetch = require('node-fetch');
-const ical = require('ical');
-const icalGen = require('ical-generator').default;
-const cors = require('cors');
-const { Pool } = require('pg');
-const crypto = require('crypto');
-require('dotenv').config();
+// ======================
+// Proxy calendrier LIVABLŌM + iCal dynamique + PostgreSQL
+// Clean, stable & ready
+// ======================
+
+const express = require("express");
+const fetch = require("node-fetch");
+const ical = require("ical"); // parser iCal externes (lecture)
+const icalGen = require("ical-generator").default; // génération iCal (écriture)
+const cors = require("cors");
+const { Pool } = require("pg");
+require("dotenv").config();
+
 const app = express();
-app.use(cors()); app.use(express.json({ limit: '16kb' }));
-app.use((req,res,next)=>{res.set('Cache-Control','no-store'); next();});
-const pool = new Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:false}});
-const names = ['LIVA','BLOM'];
-function normalize(s){return String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').trim().toUpperCase();}
-function housing(s){const n=normalize(s); if(!names.includes(n)) throw Object.assign(new Error('Logement inconnu'),{status:400}); return n;}
-function date(s){if(typeof s!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(s)||!Number.isFinite(Date.parse(s))||new Date(s).toISOString().slice(0,10)!==s)throw Object.assign(new Error('Date invalide'),{status:400});return s;}
-function range(s,e){s=date(s);e=date(e);if(s>=e)throw Object.assign(new Error('Période invalide'),{status:400}); return [s,e];}
-function day(d){return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(d));}
-function eventDay(d){return d.dateOnly ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : day(d);}
-function overlaps(a,b){return a.start<b.end&&a.end>b.start;}
-const sources=Object.fromEntries(names.map(n=>[n,['GOOGLE','AIRBNB','BOOKING'].map(source=>({source,url:process.env[`${n}_${source}_ICS`]}))]));
-const ready=pool.query(`
-CREATE TABLE IF NOT EXISTS calendar_sync_snapshots (
- logement TEXT NOT NULL, source TEXT NOT NULL, events JSONB NOT NULL,
- fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(logement,source));
-CREATE TABLE IF NOT EXISTS calendar_booking_holds (
- id UUID PRIMARY KEY, logement TEXT NOT NULL, start_date DATE NOT NULL, end_date DATE NOT NULL,
- state TEXT NOT NULL DEFAULT 'pending', stripe_session_id TEXT UNIQUE,
- reservation_id INTEGER, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
-ALTER TABLE reservations ADD COLUMN IF NOT EXISTS stripe_session_id TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS reservations_stripe_session_unique ON reservations(stripe_session_id);
-`);
-ready.catch(()=>console.error('Initialisation calendrier impossible'));
-function auth(req,res,next){const actual=Buffer.from(String(req.headers['x-calendar-token']||''));const expected=Buffer.from(process.env.CALENDAR_API_TOKEN||'');if(!expected.length||actual.length!==expected.length||!crypto.timingSafeEqual(actual,expected))return res.status(401).json({error:'Non autorisé'});next();}
-async function external(n,{strict=false}={}){
- let failed=false;const result=await Promise.all(sources[n].map(async({source,url})=>{
-  try{
-   if(!url)throw new Error('Source non configurée');
-   const response=await fetch(url,{timeout:12000,size:5*1024*1024,headers:{'User-Agent':'LIVABLOM Calendar','Accept':'text/calendar','Cache-Control':'no-cache'}});
-   if(!response.ok)throw new Error(`HTTP ${response.status}`);
-   const body=await response.text();if(!body.includes('BEGIN:VCALENDAR')||!body.includes('END:VCALENDAR'))throw new Error('Contenu iCal invalide');
-   const parsed=Object.values(ical.parseICS(body));
-   const events=parsed.filter(e=>e.type==='VEVENT'&&e.status!=='CANCELLED').map(e=>{
-    if(!e.start||!e.end||!Number.isFinite(+e.start)||!Number.isFinite(+e.end))throw new Error('Événement incomplet');
-    if(e.rrule)throw new Error('Récurrence non prise en charge : vérifier la source');
-    const start=eventDay(e.start),end=eventDay(e.end);if(end<=start)throw new Error('Événement non interprétable comme nuitée');
-    return {id:`${source}-${e.uid||crypto.createHash('sha256').update(start+end+String(e.summary)).digest('hex')}`,title:'Réservé',start,end};
-   });
-   await pool.query(`INSERT INTO calendar_sync_snapshots(logement,source,events) VALUES($1,$2,$3::jsonb) ON CONFLICT(logement,source) DO UPDATE SET events=EXCLUDED.events,fetched_at=NOW()`,[n,source,JSON.stringify(events)]);
-   console.log(JSON.stringify({action:'ical_import',logement:n,source,ok:true,count:events.length,time:new Date().toISOString()}));return events;
-  }catch(err){
-   failed=true;console.warn(JSON.stringify({action:'ical_import',logement:n,source,ok:false,reason:err.message,time:new Date().toISOString()}));
-   // Conserve les dernières dates occupées ; aucune autorisation de vente sur cet import.
-   const previous=await pool.query('SELECT events FROM calendar_sync_snapshots WHERE logement=$1 AND source=$2',[n,source]);return previous.rows[0]?.events||[];
-  }
- }));
- if(failed)throw Object.assign(new Error('Disponibilités temporairement impossibles à vérifier'),{status:503});
- return result.flat();
-}
-async function internal(n,db=pool){
- const reservations=await db.query(`SELECT id,start::date::text AS start_day,"end"::date::text AS end_day FROM reservations WHERE logement=$1`,[n]);
- const holds=await db.query(`SELECT id,start_date::text,end_date::text FROM calendar_booking_holds WHERE logement=$1 AND state='pending'`,[n]);
- return reservations.rows.map(r=>({id:`reservation-${r.id}`,title:'Réservé',start:r.start_day,end:r.end_day})).concat(holds.rows.map(r=>({id:`hold-${r.id}`,title:'Réservé',start:r.start_date,end:r.end_date})));
-}
-async function all(n){await ready;return (await external(n)).concat(await internal(n));}
-function fail(res,e){console.error('Calendrier:',e.message);return res.status(e.status||503).json({error:e.status===409?'dates_unavailable':'availability_unavailable',message:e.message});}
-app.get('/api/reservations/:logement',async(req,res)=>{try{res.json(await all(housing(req.params.logement)));}catch(e){fail(res,e);}});
-app.get('/ical/:logement.ics',async(req,res)=>{try{
- const n=housing(req.params.logement),events=await all(n),cal=icalGen({name:`Calendrier ${n} - LIVABLŌM`});
- const seen=new Set();for(const e of events){const key=e.start+'/'+e.end;if(seen.has(key))continue;seen.add(key);cal.createEvent({id:`livablom-${n}-${crypto.createHash('sha256').update(key).digest('hex')}@calendar-proxy`,start:new Date(e.start+'T00:00:00Z'),end:new Date(e.end+'T00:00:00Z'),allDay:true,summary:'Réservé'});}
- res.type('text/calendar').send(cal.toString());
-}catch(e){fail(res,e);}});
-// Le verrou en base protège aussi contre deux requêtes sur plusieurs instances Railway.
-app.post('/api/holds',auth,async(req,res)=>{
- let db;try{
-  await ready;const n=housing(req.body.logement),[start,end]=range(req.body.startDate,req.body.endDate);
-  const externalEvents=await external(n,{strict:true});
-  db=await pool.connect();await db.query('BEGIN');await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',['livablom:'+n]);
-  const events=externalEvents.concat(await internal(n,db));
-  if(events.some(e=>overlaps({start,end},e)))throw Object.assign(new Error('La période sélectionnée est déjà réservée'),{status:409});
-  const id=crypto.randomUUID();await db.query('INSERT INTO calendar_booking_holds(id,logement,start_date,end_date) VALUES($1,$2,$3,$4)',[id,n,start,end]);await db.query('COMMIT');res.json({id});
- }catch(e){if(db)await db.query('ROLLBACK');fail(res,e);}finally{db?.release();}
+
+// Middlewares
+app.use(cors());
+app.use(express.json()); // parse JSON body
+
+const PORT = process.env.PORT || 4000;
+
+// ----------------------
+// PostgreSQL
+// ----------------------
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
-app.post('/api/holds/:id/attach',auth,async(req,res)=>{try{await ready;const r=await pool.query(`UPDATE calendar_booking_holds SET stripe_session_id=$2 WHERE id=$1 AND state='pending' AND (stripe_session_id IS NULL OR stripe_session_id=$2) RETURNING id`,[req.params.id,req.body.sessionId]);if(!r.rowCount)throw new Error('Blocage introuvable');res.json({success:true});}catch(e){fail(res,e);}});
-// Libération seulement sur webhook Stripe signé d'expiration/échec, jamais selon l'horloge locale.
-app.post('/api/holds/:id/release',auth,async(req,res)=>{try{await ready;await pool.query(`UPDATE calendar_booking_holds SET state='released' WHERE id=$1 AND state='pending' AND (stripe_session_id IS NULL OR stripe_session_id=$2)`,[req.params.id,req.body.sessionId]);res.json({success:true});}catch(e){fail(res,e);}});
-app.post('/api/add-reservation',auth,async(req,res)=>{
- let db;try{
-  await ready;const n=housing(req.body.logement),[start,end]=range(req.body.date_debut,req.body.date_fin),sessionId=req.body.sessionId;
-  if(typeof sessionId!=='string'||!sessionId.startsWith('cs_'))throw Object.assign(new Error('Session Stripe requise'),{status:400});
-  db=await pool.connect();await db.query('BEGIN');await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',['livablom:'+n]);
-  const old=await db.query('SELECT id FROM reservations WHERE stripe_session_id=$1',[sessionId]);
-  if(old.rowCount){await db.query('COMMIT');return res.json({success:true,id:old.rows[0].id});}
-  if(req.body.holdId){
-   const h=await db.query('SELECT *,start_date::text AS s,end_date::text AS e FROM calendar_booking_holds WHERE id=$1 FOR UPDATE',[req.body.holdId]);const row=h.rows[0];
-   if(!row||row.state!=='pending'||row.logement!==n||row.s!==start||row.e!==end||(row.stripe_session_id&&row.stripe_session_id!==sessionId))throw new Error('Blocage incompatible avec le paiement');
+
+pool.connect()
+  .then(() => console.log("✅ PostgreSQL connecté !"))
+  .catch(err => console.error("❌ Erreur connexion PostgreSQL :", err));
+
+// ----------------------
+// Helpers : normalisation (supprime accents + uppercase)
+// ----------------------
+function normalizeLogementName(s) {
+  if (!s) return "";
+  return String(s)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+}
+
+// ----------------------
+// URLs iCal pour chaque logement (depuis .env)
+// ----------------------
+const calendars = {
+  LIVA: [
+    process.env.LIVA_GOOGLE_ICS,
+    process.env.LIVA_AIRBNB_ICS,
+    process.env.LIVA_BOOKING_ICS
+  ].filter(Boolean),
+  BLOM: [
+    process.env.BLOM_GOOGLE_ICS,
+    process.env.BLOM_AIRBNB_ICS,
+    process.env.BLOM_BOOKING_ICS
+  ].filter(Boolean)
+};
+
+// ----------------------
+// Fonction pour récupérer et parser un iCal externe (Airbnb/Booking/Google)
+// ----------------------
+async function fetchICal(url) {
+  if (!url) return [];
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        Accept: "text/calendar, text/plain, */*"
+      },
+    });
+
+    if (!res.ok) {
+      console.warn(`⚠️ fetchICal: ${url} returned ${res.status}`);
+      return [];
+    }
+
+    const data = await res.text();
+    const parsed = ical.parseICS(data);
+
+    return Object.values(parsed)
+      .filter(ev => ev && ev.start && ev.end)
+      .map(ev => ({
+        title: (ev.summary || "Réservé").toString(),
+        start: ev.start,
+        end: ev.end
+      }));
+  } catch (err) {
+    console.error("❌ Erreur fetchICal pour", url, err);
+    return [];
   }
-  // Les anciennes sessions ouvertes avant déploiement restent traitées et journalisées.
-  else console.warn('Paiement ancien sans blocage préalable :',sessionId);
-  const r=await db.query(`INSERT INTO reservations(logement,start,"end",title,stripe_session_id) VALUES($1,($2::date+time '18:00'),($3::date+time '11:00'),$4,$5) RETURNING id`,[n,start,end,`Réservation ${n}`,sessionId]);
-  if(req.body.holdId)await db.query(`UPDATE calendar_booking_holds SET state='confirmed',stripe_session_id=$2,reservation_id=$3 WHERE id=$1`,[req.body.holdId,sessionId,r.rows[0].id]);
-  await db.query('COMMIT');res.json({success:true,id:r.rows[0].id});
- }catch(e){if(db)await db.query('ROLLBACK');fail(res,e);}finally{db?.release();}
+}
+
+// ----------------------
+// Récupérer les réservations internes depuis PostgreSQL
+// ----------------------
+async function fetchInternalReservations(logement) {
+  try {
+    const normalized = normalizeLogementName(logement);
+    const res = await pool.query(
+      'SELECT id, title, start, "end" FROM reservations WHERE logement = $1 ORDER BY start ASC',
+      [normalized]
+    );
+    return res.rows.map(r => ({
+      id: r.id,
+      title: r.title,
+      start: new Date(r.start),
+      end: new Date(r.end)
+    }));
+  } catch (err) {
+    console.error("❌ Erreur fetch reservations internes :", err);
+    return [];
+  }
+}
+
+// ----------------------
+// Fusionner toutes les réservations pour un logement
+// ----------------------
+async function getAllReservations(logement) {
+  const key = normalizeLogementName(logement);
+  if (!calendars[key] || calendars[key].length === 0) {
+    return await fetchInternalReservations(key);
+  }
+
+  let events = [];
+  const promises = calendars[key].map(url => fetchICal(url));
+  const externalArrays = await Promise.all(promises);
+  externalArrays.forEach(arr => { events = events.concat(arr); });
+
+  const internal = await fetchInternalReservations(key);
+  events = events.concat(internal);
+
+  events = events.map(ev => ({
+    title: ev.title || "Réservé",
+    start: ev.start instanceof Date ? ev.start : new Date(ev.start),
+    end: ev.end instanceof Date ? ev.end : new Date(ev.end)
+  }));
+
+  return events;
+}
+
+// ----------------------
+// Endpoint JSON - retourne la liste d'événements (no-cache)
+// ----------------------
+app.get("/api/reservations/:logement", async (req, res) => {
+  const logement = req.params.logement;
+  try {
+    const events = await getAllReservations(logement);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    const payload = events.map(ev => ({
+      title: ev.title,
+      start: new Date(ev.start).toISOString(),
+      end: new Date(ev.end).toISOString()
+    }));
+    res.json(payload);
+  } catch (err) {
+    console.error("❌ /api/reservations error:", err);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
 });
-app.get('/',(req,res)=>res.send('Proxy calendrier LIVABLŌM'));
-ready.then(()=>app.listen(process.env.PORT||4000,()=>console.log('Calendrier prêt'))).catch(()=>process.exit(1));
+
+// ----------------------
+// Endpoint pour générer iCal dynamique (.ics)
+// ----------------------
+app.get("/ical/:logement.ics", async (req, res) => {
+  const logement = req.params.logement;
+  try {
+    const events = await getAllReservations(logement);
+
+    const cal = icalGen({
+      name: `Calendrier ${normalizeLogementName(logement)} - LIVABLŌM`,
+      timezone: "Europe/Paris",
+      prodId: { company: "LIVABLŌM", product: "CalendarProxy" }
+    });
+
+    events.forEach((r, idx) => {
+      cal.createEvent({
+        start: new Date(r.start),
+        end: new Date(r.end),
+        summary: r.title || `Réservé ${normalizeLogementName(logement)}`,
+        description: r.title || `Réservation ${normalizeLogementName(logement)}`,
+        uid: `livablom-${normalizeLogementName(logement)}-${r.id || idx}@calendar-proxy`,
+        timezone: "Europe/Paris"
+      });
+    });
+
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${normalizeLogementName(logement)}.ics"`);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.send(cal.toString());
+  } catch (err) {
+    console.error("❌ Erreur génération iCal:", err);
+    res.status(500).send("Erreur serveur");
+  }
+});
+
+// ----------------------
+// Route pour recevoir les réservations (Stripe ou site)
+// ----------------------
+app.post("/api/add-reservation", async (req, res) => {
+  console.log("📩 Requête reçue sur /api/add-reservation");
+  console.log("🧠 Corps reçu :", req.body);
+
+  const logementRaw = req.body.logement;
+  const rawStart = req.body.start || req.body.date_debut;
+  const rawEnd = req.body.end || req.body.date_fin;
+  const title = req.body.title || "Réservation via Stripe / Site";
+
+  if (!logementRaw || !rawStart || !rawEnd) {
+    console.warn("⚠️ Données manquantes :", req.body);
+    return res.status(400).json({ error: "Données manquantes" });
+  }
+
+  try {
+    const logement = normalizeLogementName(logementRaw);
+
+    function parseInputToDate(input, defaultHour, defaultMinute) {
+      if (input instanceof Date && !isNaN(input)) return input;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+        const [Y, M, D] = input.split("-").map(Number);
+        return new Date(Y, M - 1, D, defaultHour, defaultMinute, 0);
+      }
+      const d = new Date(input);
+      if (!isNaN(d)) return d;
+      const now = new Date();
+      now.setHours(defaultHour, defaultMinute, 0, 0);
+      return now;
+    }
+
+    const startDate = parseInputToDate(rawStart, 15, 0);
+    const endDate = parseInputToDate(rawEnd, 10, 0);
+
+    function formatPG(d) {
+      const pad = n => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    const startTime = formatPG(startDate);
+    const endTime = formatPG(endDate);
+
+    const query = `
+      INSERT INTO reservations (logement, start, "end", title)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id
+    `;
+    const values = [logement, startTime, endTime, title];
+    const result = await pool.query(query, values);
+
+    console.log(`✅ Réservation ajoutée pour ${logement}: ${startTime} → ${endTime}`);
+    res.json({ success: true, id: result.rows[0].id });
+  } catch (err) {
+    console.error("❌ Erreur ajout BDD proxy:", err);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
+// ----------------------
+// Test route & listen
+// ----------------------
+app.get("/", (req, res) => res.send("🚀 Proxy calendrier LIVABLŌM opérationnel !"));
+
+app.listen(PORT, () => console.log(`✅ Proxy calendrier lancé sur le port ${PORT}`));
