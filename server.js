@@ -78,7 +78,22 @@ async function fetchICal(url) {
 
     const data = await res.text();
     const parsed = ical.parseICS(data);
+const events = Object.values(parsed).filter(
+  ev => ev && ev.start && ev.end
+);
 
+console.log(
+  "IMPORT CALENDRIER",
+  new URL(url).hostname,
+  "événements :", events.length,
+  "récurrences :", events.filter(ev => ev.rrule).length,
+  "début et fin le même jour :", events.filter(ev =>
+    ev.start instanceof Date &&
+    ev.end instanceof Date &&
+    ev.start.toISOString().slice(0, 10) ===
+      ev.end.toISOString().slice(0, 10)
+  ).length
+);
     return Object.values(parsed)
       .filter(ev => ev && ev.start && ev.end)
       .map(ev => ({
